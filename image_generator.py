@@ -43,3 +43,41 @@ def generate_simple_image(prompt: str, filename: str):
     img.save(filename)
     
     return filename
+    
+    def generate_story_image(prompt: str, filename: str):
+    """Генерація зображення для сцени історії"""
+    try:
+        width, height = 1024, 768
+        img = Image.new('RGB', (width, height), color='lightblue')
+        draw = ImageDraw.Draw(img)
+        
+        # Кольори для дитячих зображень
+        colors = ['#FF6B6B', '#4ECDC4', '#FFE66D', '#6B48FF', '#FF9F1C']
+        
+        # Малюємо яскраві фігури
+        for i in range(8):
+            color = colors[i % len(colors)]
+            x1, y1 = random.randint(0, width), random.randint(0, height)
+            size = random.randint(50, 200)
+            
+            if random.choice([True, False]):
+                draw.rectangle([x1, y1, x1+size, y1+size], fill=color, outline='white')
+            else:
+                draw.ellipse([x1, y1, x1+size, y1+size], fill=color, outline='white')
+        
+        # Додаємо текст сцени
+        try:
+            font = ImageFont.truetype("arial.ttf", 30)
+            words = prompt.split()[:10]  # Перші 10 слів
+            short_prompt = ' '.join(words)
+            draw.text((width//2, height-50), short_prompt, fill='black', 
+                     font=font, anchor='mm')
+        except:
+            pass
+        
+        img.save(filename)
+        return True
+        
+    except Exception as e:
+        print(f"Помилка генерації зображення: {e}")
+        return False
