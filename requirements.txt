@@ -1,0 +1,8 @@
+python-telegram-bot
+openai
+moviepy
+Pillow
+requests
+gTTS
+ffmpeg-python
+numpy
