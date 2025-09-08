@@ -1,3 +1,4 @@
+from image_generator import generate_story_image, generate_simple_image
 import os
 import logging
 from telegram import Update, Bot
