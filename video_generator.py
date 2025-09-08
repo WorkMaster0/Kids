@@ -1,9 +1,9 @@
 import os
 from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
 from gtts import gTTS
-from PIL import Image, ImageDraw, ImageFont
 import random
 import tempfile
+import time
 
 def generate_story(topic: str) -> str:
     """Генерація цікавих дитячих історій"""
@@ -71,12 +71,12 @@ def generate_story_scenes(story_text: str):
     
     # Розбиваємо історію на сцени
     parts = story_text.split('. ')
-    for i, part in enumerate(parts[:4]):  # Максимум 4 сцени
-        if part.strip() and len(part) > 10:  # Мінімальна довжина сцени
+    for i, part in enumerate(parts[:3]):  # Максимум 3 сцени
+        if part.strip() and len(part) > 5:  # Мінімальна довжина сцени
             scenes.append({
                 "text": part + '.',
-                "image_prompt": f"Дитяче мультяшне зображення: {part}",
-                "duration": 7  # секунд на сцену
+                "image_prompt": f"{part}",
+                "duration": 6  # секунд на сцену
             })
     
     return scenes
@@ -84,8 +84,10 @@ def generate_story_scenes(story_text: str):
 def generate_audio(text: str, filename: str):
     """Генерація аудіо (текст у мову)"""
     try:
+        print(f"Генеруємо аудіо для тексту: {text[:50]}...")
         tts = gTTS(text=text, lang='uk', slow=False)
         tts.save(filename)
+        print(f"Аудіо збережено у: {filename}")
         return filename
     except Exception as e:
         print(f"Помилка генерації аудіо: {e}")
@@ -97,45 +99,78 @@ def generate_audio(text: str, filename: str):
 async def generate_children_video(topic: str, user_id: str):
     """Генерація повноцінного дитячого відео"""
     try:
+        print(f"Початок генерації для теми: {topic}")
+        
         # Генеруємо історію
         story_text = generate_story(topic)
+        print(f"Згенерована історія: {story_text}")
+        
         scenes = generate_story_scenes(story_text)
+        print(f"Створено сцен: {len(scenes)}")
         
         if not scenes:
+            print("Немає сцен для обробки")
             return {"text": story_text}
         
         # Створюємо тимчасову папку
         temp_dir = tempfile.mkdtemp()
+        print(f"Тимчасова папка: {temp_dir}")
+        
         audio_path = os.path.join(temp_dir, "story_audio.mp3")
         
         # Генеруємо аудіо історії
         generate_audio(story_text, audio_path)
         
+        # Перевіряємо чи існує аудіо файл
+        if not os.path.exists(audio_path) or os.path.getsize(audio_path) == 0:
+            print("Аудіо файл не створено")
+            return {"text": story_text}
+        
         # Генеруємо зображення для кожної сцени
         image_paths = []
         for i, scene in enumerate(scenes):
             img_path = os.path.join(temp_dir, f"scene_{i}.png")
+            print(f"Генеруємо зображення для сцени {i}: {scene['image_prompt']}")
+            
+            # Імпортуємо тут, щоб уникнути циклічних імпортів
             from Image_generator import generate_story_image
             if generate_story_image(scene['image_prompt'], img_path):
-                image_paths.append(img_path)
+                if os.path.exists(img_path):
+                    image_paths.append(img_path)
+                    print(f"Зображення збережено: {img_path}")
+                else:
+                    print(f"Зображення не створено: {img_path}")
+            else:
+                print(f"Помилка генерації зображення для сцени {i}")
+        
+        print(f"Створено зображень: {len(image_paths)}")
         
         # Перевіряємо чи є зображення
         if not image_paths:
+            print("Немає зображень для створення відео")
             return {"text": story_text}
         
-        # Створюємо відео
+        # Спробуємо створити відео
         try:
+            print("Створюємо відео...")
+            
+            # Завантажуємо аудіо
             audio_clip = AudioFileClip(audio_path)
             total_duration = audio_clip.duration
             scene_duration = total_duration / len(image_paths)
+            
+            print(f"Тривалість аудіо: {total_duration}, тривалість сцени: {scene_duration}")
             
             clips = []
             for img_path in image_paths:
                 clip = ImageClip(img_path).set_duration(scene_duration)
                 clips.append(clip)
             
+            # Об'єднуємо кліпи
             final_clip = concatenate_videoclips(clips).set_audio(audio_clip)
             video_path = os.path.join(temp_dir, "final_video.mp4")
+            
+            print("Записуємо відеофайл...")
             
             # Налаштування для кращої якості
             final_clip.write_videofile(
@@ -145,8 +180,17 @@ async def generate_children_video(topic: str, user_id: str):
                 audio_codec='aac',
                 threads=4,
                 preset='fast',
-                ffmpeg_params=['-crf', '23']
+                verbose=False,
+                logger=None
             )
+            
+            print(f"Відео успішно створено: {video_path}")
+            
+            # Закриваємо кліпи для звільнення пам'яті
+            final_clip.close()
+            for clip in clips:
+                clip.close()
+            audio_clip.close()
             
             return video_path
             
@@ -166,5 +210,7 @@ async def generate_children_video(topic: str, user_id: str):
             }
         
     except Exception as e:
-        print(f"Помилка генерації відео: {e}")
+        print(f"Загальна помилка генерації відео: {e}")
+        import traceback
+        traceback.print_exc()
         return {"text": generate_story(topic)}
