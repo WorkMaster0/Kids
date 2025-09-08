@@ -3,7 +3,6 @@ openai
 moviepy==1.0.3
 Pillow
 requests
-gTTS
 ffmpeg-python
 numpy
 flask==2.3.0
