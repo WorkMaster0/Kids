@@ -38,12 +38,20 @@ bot = Bot(TOKEN)
 # Обробники команд
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
-        "👋 Привіт! Я створюю відео з аудіо!\n\n"
-        "Напиши текст, і я:\n"
-        "🎵 Перетворю його в аудіо\n"
+        "👋 Привіт! Я створюю дитячі історії!\n\n"
+        "Напиши тему, і я:\n"
+        "📖 Придумаю цікаву історію\n"
+        "🎵 Озвучу її українською\n"
         "🎨 Створю яскраве зображення\n"
-        "🎬 Згенерую відеофайл\n\n"
-        "Напиши будь-який текст (наприклад: 'Весела пригода')"
+        "🎬 Згенерую відео\n\n"
+        "Приклади тем:\n"
+        "• динозаврик\n"
+        "• космос\n"
+        "• принцеса\n"
+        "• лісові звірята\n"
+        "• машинки\n"
+        "• казка\n\n"
+        "Напиши будь-яку тему!"
     )
     await update.message.reply_text(welcome_text)
 
@@ -68,14 +76,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.message.from_user.id
     
     if len(user_message) < 2:
-        await update.message.reply_text("📝 Будь ласка, напиши текст (мінімум 2 символи)")
+        await update.message.reply_text("📝 Будь ласка, напиши тему (мінімум 2 символи)")
         return
     
-    if len(user_message) > 200:
-        await update.message.reply_text("📝 Текст занадто довгий. Максимум 200 символів.")
+    if len(user_message) > 50:
+        await update.message.reply_text("📝 Тема занадто довга. Максимум 50 символів.")
         return
     
-    await update.message.reply_text("🎬 Створюю відео... Це може зайняти хвилину.")
+    await update.message.reply_text("🎬 Створюю дитячу історію... Це може зайняти хвилину.")
     
     try:
         result = await generate_video_with_audio(user_message, user_id)
@@ -89,6 +97,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 file_size = os.path.getsize(result) / (1024 * 1024)
                 if file_size > 45:
                     await update.message.reply_text("❌ Відео занадто велике для відправки")
+                    # Надсилаємо текст історії
+                    from video_generator import generate_story_from_topic
+                    story_text = generate_story_from_topic(user_message)
+                    await update.message.reply_text(f"📖 Ось історія:\n\n{story_text}")
                     os.remove(result)
                     return
                 
@@ -97,7 +109,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 with open(result, 'rb') as video_file:
                     await update.message.reply_video(
                         video=video_file,
-                        caption=f"🎉 Ваше відео готове!\nТекст: {user_message}",
+                        caption=f"🎉 Дитяча історія на тему: {user_message}",
                         supports_streaming=True,
                         width=1024,
                         height=768
@@ -109,7 +121,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     
             except Exception as e:
                 print(f"Помилка відправки відео: {e}")
-                await update.message.reply_text(f"❌ Не вдалося відправити відео. Текст: {user_message}")
+                # Надсилаємо текст історії
+                from video_generator import generate_story_from_topic
+                story_text = generate_story_from_topic(user_message)
+                await update.message.reply_text(f"📖 Ось історія:\n\n{story_text}")
                 
         elif isinstance(result, dict) and "audio" in result:
             # Тільки аудіо
@@ -118,23 +133,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     with open(result["audio"], 'rb') as audio_file:
                         await update.message.reply_audio(
                             audio=audio_file,
-                            caption=f"🎵 Аудіо версія:\n{user_message}",
-                            title="Аудіо",
-                            performer="Bot"
+                            caption=f"🎵 Дитяча історія на тему: {user_message}",
+                            title="Дитяча історія",
+                            performer="StoryBot"
                         )
                     os.remove(result["audio"])
+                    
+                    # Надсилаємо текст історії
+                    if "text" in result:
+                        await update.message.reply_text(f"📖 Текст історії:\n\n{result['text']}")
             except Exception as e:
                 print(f"Помилка відправки аудіо: {e}")
-                await update.message.reply_text(f"🔊 Текст: {user_message}")
+                if "text" in result:
+                    await update.message.reply_text(f"📖 Ось історія:\n\n{result['text']}")
                 
+        elif isinstance(result, dict) and "text" in result:
+            # Тільки текст
+            await update.message.reply_text(f"📖 Дитяча історія на тему '{user_message}':\n\n{result['text']}")
+            
         else:
-            await update.message.reply_text(f"📝 Текст: {user_message}")
+            # Генеруємо історію як запасний варіант
+            from video_generator import generate_story_from_topic
+            story_text = generate_story_from_topic(user_message)
+            await update.message.reply_text(f"📖 Ось історія:\n\n{story_text}")
             
     except Exception as e:
         logging.error(f"Помилка: {e}")
         import traceback
         traceback.print_exc()
-        await update.message.reply_text(f"📝 Текст: {user_message}")
+        # Генеруємо історію як запасний варіант
+        from video_generator import generate_story_from_topic
+        story_text = generate_story_from_topic(user_message)
+        await update.message.reply_text(f"📖 Ось історія:\n\n{story_text}")
 
 # Функції для вебхука
 def set_webhook_sync():
