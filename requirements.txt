@@ -6,4 +6,4 @@ requests
 gTTS
 ffmpeg-python
 numpy
-flask[async]
+flask[async]==2.3.0
