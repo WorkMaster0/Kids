@@ -18,23 +18,41 @@ WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}/{TOKEN}"
 # Створюємо Flask додаток
 app = Flask(__name__)
 
-# Створюємо та ініціалізуємо Telegram Application
-application = Application.builder().token(TOKEN).build()
+# Глобальні змінні для Application
+application = None
+bot_instance = None
 
-# Ініціалізуємо application
+def setup_application():
+    """Ініціалізація Application (синхронно)"""
+    global application, bot_instance
+    
+    application = Application.builder().token(TOKEN).build()
+    bot_instance = application.bot
+    
+    # Додаємо обробники
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    
+    # Ініціалізуємо application
+    asyncio.run(initialize_app())
+    
+    logging.info("✅ Application ініціалізовано")
+
 async def initialize_app():
     """Ініціалізація Application"""
     await application.initialize()
     await application.start()
-    logging.info("✅ Application ініціалізовано")
 
-async def set_webhook_on_startup():
-    """Автоматично встановлюємо вебхук при запуску"""
+async def set_webhook_async():
+    """Асинхронне встановлення вебхука"""
     try:
-        await application.bot.set_webhook(url=WEBHOOK_URL)
+        await bot_instance.set_webhook(url=WEBHOOK_URL)
         logging.info(f"✅ Webhook встановлено: {WEBHOOK_URL}")
+        return True
     except Exception as e:
         logging.error(f"❌ Помилка встановлення webhook: {e}")
+        return False
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
@@ -61,13 +79,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     caption=f"🎵 {result['text']}\n\nТема: {user_message}"
                 )
             os.remove(result["audio"])
-            
-            # Відправляємо зображення
-            if "images" in result:
-                for img_path in result["images"]:
-                    with open(img_path, 'rb') as img_file:
-                        await update.message.reply_photo(photo=img_file)
-                    os.remove(img_path)
         else:
             await update.message.reply_text(f"📖 {result['text']}\n\nТема: {user_message}")
             
@@ -79,11 +90,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = "📖 Напиши тему для відео: \"казка\", \"вчимо кольори\", \"пісенька\""
     await update.message.reply_text(help_text)
 
-# Додаємо обробники
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("help", help_command))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
 @app.route('/')
 def home():
     return "🤖 Дитячий Video Bot is running! 🎬"
@@ -92,8 +98,16 @@ def home():
 def set_webhook_route():
     """Вручну встановити вебхук"""
     try:
-        asyncio.run(set_webhook_on_startup())
-        return f"✅ Webhook встановлено: {WEBHOOK_URL}"
+        # Створюємо новий event loop для кожного запиту
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(set_webhook_async())
+        loop.close()
+        
+        if result:
+            return f"✅ Webhook встановлено: {WEBHOOK_URL}"
+        else:
+            return f"❌ Не вдалося встановити webhook"
     except Exception as e:
         return f"❌ Помилка: {e}"
 
@@ -101,7 +115,10 @@ def set_webhook_route():
 def remove_webhook_route():
     """Видалити вебхук"""
     try:
-        asyncio.run(application.bot.delete_webhook())
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        result = loop.run_until_complete(bot_instance.delete_webhook())
+        loop.close()
         return "✅ Webhook видалено"
     except Exception as e:
         return f"❌ Помилка: {e}"
@@ -112,7 +129,7 @@ def status():
     return {
         "status": "running",
         "webhook_url": WEBHOOK_URL,
-        "bot_token": TOKEN[:10] + "..."
+        "bot_initialized": application is not None
     }
 
 @app.route(f'/{TOKEN}', methods=['POST'])
@@ -126,18 +143,17 @@ def webhook():
         if not data:
             return 'Invalid JSON', 400
         
-        update = Update.de_json(data, application.bot)
+        update = Update.de_json(data, bot_instance)
         
-        # Створюємо окремий event loop для кожного потоку
+        # Обробляємо оновлення в окремому потоці з новим event loop
         def process_update_sync():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
             try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
                 loop.run_until_complete(application.process_update(update))
+                loop.close()
             except Exception as e:
                 logging.error(f"Помилка обробки оновлення: {e}")
-            finally:
-                loop.close()
         
         thread = threading.Thread(target=process_update_sync)
         thread.start()
@@ -150,29 +166,38 @@ def webhook():
 
 async def shutdown():
     """Коректне закриття"""
-    await application.stop()
-    await application.shutdown()
+    if application:
+        await application.stop()
+        await application.shutdown()
 
 def main():
     """Запуск бота"""
     if os.environ.get('RENDER'):
         logging.info("🚀 Запуск на Render з вебхуком...")
         
-        # Ініціалізуємо та встановлюємо вебхук
+        # Ініціалізуємо application
+        setup_application()
+        
+        # Встановлюємо вебхук
         try:
-            asyncio.run(initialize_app())
-            asyncio.run(set_webhook_on_startup())
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(set_webhook_async())
+            loop.close()
         except Exception as e:
-            logging.error(f"Помилка ініціалізації: {e}")
+            logging.error(f"Помилка встановлення webhook: {e}")
         
         # Запускаємо Flask
         port = int(os.environ.get('PORT', 5000))
         app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
         
-        # Коректне закриття
-        asyncio.run(shutdown())
     else:
         logging.info("🖥️ Запуск локально з polling...")
+        # Для локального запуску
+        application = Application.builder().token(TOKEN).build()
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("help", help_command))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         application.run_polling()
 
 if __name__ == "__main__":
