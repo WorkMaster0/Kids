@@ -1,18 +1,29 @@
-from image_generator import generate_story_image, generate_simple_image
 import os
 import logging
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from video_generator import generate_children_video, generate_story
+from video_generator import generate_video_with_audio
 from flask import Flask, request
 import asyncio
 import threading
 import tempfile
 import requests
+import sys
+from datetime import datetime
+
+# Додаємо поточну директорію до шляху пошуку модулів
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 # Налаштування
 TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', "8227990363:AAGGZbv_gMZyPdPM95f6FnbtxoY96wiqXpQ")
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler('bot.log')
+    ]
+)
 
 # Отримуємо URL з змінних оточення Render
 RENDER_EXTERNAL_URL = os.environ.get('RENDER_EXTERNAL_URL', 'https://kids-rvcr.onrender.com')
@@ -27,30 +38,27 @@ bot = Bot(TOKEN)
 # Обробники команд
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
-        "👋 Привіт! Я створюю дитячі історії!\n\n"
-        "Напиши тему для відео, наприклад:\n"
-        "• казка про динозаврика\n"
-        "• пригоди у лісі\n"
-        "• космічна подорож\n"
-        "• історія про принцесу\n"
-        "• веселі машинки\n\n"
-        "Я згенерую історію, зображення та відео!"
+        "👋 Привіт! Я створюю відео з аудіо!\n\n"
+        "Напиши текст, і я:\n"
+        "🎵 Перетворю його в аудіо\n"
+        "🎨 Створю яскраве зображення\n"
+        "🎬 Згенерую відеофайл\n\n"
+        "Напиши будь-який текст (наприклад: 'Весела пригода')"
     )
     await update.message.reply_text(welcome_text)
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         "ℹ️ Допомога:\n\n"
-        "Просто напиши будь-яку тему для дитячої історії, наприклад:\n"
-        "- казка про дракончика\n"
-        "- пригоди у морі\n"
-        "- історія про робота\n"
-        "- веселі тварини\n\n"
-        "Я створюю:\n"
-        "📖 Текст історії\n"
-        "🎨 Зображення\n"
-        "🎵 Аудіо розповідь\n"
-        "🎬 Відео (якщо вдасться)\n\n"
+        "Просто напиши будь-який текст, наприклад:\n"
+        "- Весела пригода\n"
+        "- Дитяча казка\n"
+        "- Пригоди у лісі\n"
+        "- Космічна подорож\n\n"
+        "Я створю:\n"
+        "🎵 Аудіо версію твого тексту\n"
+        "🎨 Яскраве зображення\n"
+        "🎬 Відеофайл з аудіо\n\n"
         "Почни з команди /start"
     )
     await update.message.reply_text(help_text)
@@ -59,61 +67,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     user_id = update.message.from_user.id
     
-    if len(user_message) < 3:
-        await update.message.reply_text("📝 Будь ласка, напиши трохи довшу тему (мінімум 3 символи)")
+    if len(user_message) < 2:
+        await update.message.reply_text("📝 Будь ласка, напиши текст (мінімум 2 символи)")
         return
     
-    await update.message.reply_text("🎬 Створюю дитячу історію... Це може зайняти кілька хвилин.")
+    if len(user_message) > 200:
+        await update.message.reply_text("📝 Текст занадто довгий. Максимум 200 символів.")
+        return
+    
+    await update.message.reply_text("🎬 Створюю відео... Це може зайняти хвилину.")
     
     try:
-        result = await generate_children_video(user_message, user_id)
+        result = await generate_video_with_audio(user_message, user_id)
         
         print(f"Результат генерації: {type(result)}")
         
-        # Перевіряємо тип результату
-        if isinstance(result, dict):
-            if "audio" in result and os.path.exists(result["audio"]):
-                # Відправляємо аудіо
-                try:
-                    with open(result["audio"], 'rb') as audio_file:
-                        await update.message.reply_audio(
-                            audio=audio_file,
-                            caption=f"🎵 Аудіо історія:\n\n{result['text']}\n\nТема: {user_message}",
-                            title="Дитяча історія",
-                            performer="StoryBot"
-                        )
-                    # Видаляємо тимчасові файли
-                    if os.path.exists(result["audio"]):
-                        os.remove(result["audio"])
-                except Exception as e:
-                    print(f"Помилка відправки аудіо: {e}")
-                    await update.message.reply_text(f"📖 Ось ваша історія:\n\n{result['text']}")
-                
-                # Відправляємо зображення
-                if "images" in result:
-                    for img_path in result["images"]:
-                        try:
-                            if os.path.exists(img_path) and os.path.getsize(img_path) > 0:
-                                with open(img_path, 'rb') as img_file:
-                                    await update.message.reply_photo(
-                                        photo=img_file,
-                                        caption="🖼️ Зображення до історії"
-                                    )
-                                os.remove(img_path)
-                        except Exception as e:
-                            print(f"Помилка відправки зображення: {e}")
-            elif "text" in result:
-                # Тільки текст
-                await update.message.reply_text(f"📖 Ось ваша історія:\n\n{result['text']}\n\nТема: {user_message}")
-                
-        elif isinstance(result, str) and os.path.exists(result):
+        if isinstance(result, str) and os.path.exists(result):
             # Відео файл
             try:
-                # Перевіряємо розмір файлу (Telegram має обмеження 50MB)
-                file_size = os.path.getsize(result) / (1024 * 1024)  # MB
+                # Перевіряємо розмір файлу
+                file_size = os.path.getsize(result) / (1024 * 1024)
                 if file_size > 45:
-                    await update.message.reply_text("📖 Відео занадто велике, ось історія:")
-                    await update.message.reply_text(f"{generate_story(user_message)}")
+                    await update.message.reply_text("❌ Відео занадто велике для відправки")
                     os.remove(result)
                     return
                 
@@ -122,25 +97,44 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 with open(result, 'rb') as video_file:
                     await update.message.reply_video(
                         video=video_file,
-                        caption=f"🎉 Ваше відео готове!\nТема: {user_message}",
+                        caption=f"🎉 Ваше відео готове!\nТекст: {user_message}",
                         supports_streaming=True,
                         width=1024,
                         height=768
                     )
+                
+                # Видаляємо тимчасовий файл
                 if os.path.exists(result):
                     os.remove(result)
+                    
             except Exception as e:
                 print(f"Помилка відправки відео: {e}")
-                # Якщо відео не вдалося відправити, надсилаємо текст історії
-                await update.message.reply_text(f"📖 Ось ваша історія:\n\n{generate_story(user_message)}")
+                await update.message.reply_text(f"❌ Не вдалося відправити відео. Текст: {user_message}")
+                
+        elif isinstance(result, dict) and "audio" in result:
+            # Тільки аудіо
+            try:
+                if os.path.exists(result["audio"]):
+                    with open(result["audio"], 'rb') as audio_file:
+                        await update.message.reply_audio(
+                            audio=audio_file,
+                            caption=f"🎵 Аудіо версія:\n{user_message}",
+                            title="Аудіо",
+                            performer="Bot"
+                        )
+                    os.remove(result["audio"])
+            except Exception as e:
+                print(f"Помилка відправки аудіо: {e}")
+                await update.message.reply_text(f"🔊 Текст: {user_message}")
+                
         else:
-            await update.message.reply_text("❌ Не вдалося створити контент. Спробуйте іншу тему.")
+            await update.message.reply_text(f"📝 Текст: {user_message}")
             
     except Exception as e:
         logging.error(f"Помилка: {e}")
         import traceback
         traceback.print_exc()
-        await update.message.reply_text("❌ Сталася помилка. Спробуйте іншу тему або напишіть /start")
+        await update.message.reply_text(f"📝 Текст: {user_message}")
 
 # Функції для вебхука
 def set_webhook_sync():
@@ -163,19 +157,14 @@ def set_webhook_sync():
 def process_update_sync(update_data):
     """Синхронна обробка оновлення"""
     try:
-        # Створюємо новий event loop для кожного запиту
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         
-        # Створюємо тимчасовий Application для обробки
         app = Application.builder().token(TOKEN).build()
-        
-        # Додаємо обробники
         app.add_handler(CommandHandler("start", start))
         app.add_handler(CommandHandler("help", help_command))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         
-        # Ініціалізуємо та обробляємо
         loop.run_until_complete(app.initialize())
         update = Update.de_json(update_data, app.bot)
         loop.run_until_complete(app.process_update(update))
@@ -187,11 +176,10 @@ def process_update_sync(update_data):
 
 @app.route('/')
 def home():
-    return "🤖 Дитячий Video Bot is running! 🎬"
+    return "🤖 Video Generator Bot is running! 🎬"
 
 @app.route('/set_webhook', methods=['GET'])
 def set_webhook_route():
-    """Вручну встановити вебхук"""
     if set_webhook_sync():
         return f"✅ Webhook встановлено: {WEBHOOK_URL}"
     else:
@@ -199,7 +187,6 @@ def set_webhook_route():
 
 @app.route('/remove_webhook', methods=['GET'])
 def remove_webhook_route():
-    """Видалити вебхук"""
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/deleteWebhook"
         response = requests.post(url)
@@ -209,7 +196,6 @@ def remove_webhook_route():
 
 @app.route('/status', methods=['GET'])
 def status():
-    """Перевірка статусу"""
     try:
         url = f"https://api.telegram.org/bot{TOKEN}/getWebhookInfo"
         response = requests.get(url).json()
@@ -223,34 +209,32 @@ def status():
 
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
-    """Обробка вебхука від Telegram"""
     try:
         data = request.get_json()
         if not data:
             return 'Invalid JSON', 400
         
-        # Обробляємо в окремому потоці
         thread = threading.Thread(target=process_update_sync, args=(data,))
         thread.start()
         
         return 'OK'
-        
     except Exception as e:
         logging.error(f"Webhook error: {e}")
         return 'Error', 500
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Перевірка здоров'я додатку"""
-    return {"status": "healthy", "service": "kids-story-bot"}
+    return {
+        "status": "healthy", 
+        "service": "video-generator-bot",
+        "timestamp": datetime.now().isoformat()
+    }
 
 def run_flask():
-    """Запуск Flask сервера"""
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
 
 def run_polling():
-    """Запуск бота з polling"""
     logging.info("🖥️ Запуск локально з polling...")
     application = Application.builder().token(TOKEN).build()
     application.add_handler(CommandHandler("start", start))
@@ -259,18 +243,11 @@ def run_polling():
     application.run_polling()
 
 def main():
-    """Запуск бота"""
     if os.environ.get('RENDER'):
         logging.info("🚀 Запуск на Render з вебхуком...")
-        
-        # Встановлюємо вебхук при старті
         set_webhook_sync()
-        
-        # Запускаємо Flask
         run_flask()
-        
     else:
-        # Для локального запуску
         run_polling()
 
 if __name__ == "__main__":
