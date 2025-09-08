@@ -2,7 +2,7 @@ import os
 import logging
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from video_generator import generate_story_from_topic, download_background_music, generate_cartoon, 
+from video_generator import generate_story_from_topic, download_background_music, create_cartoon_animation, generate_cartoon, 
 from flask import Flask, request
 import asyncio
 import threading
