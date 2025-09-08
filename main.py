@@ -67,9 +67,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         result = await generate_children_video(user_message, user_id)
         
+        print(f"Результат генерації: {type(result)}")
+        
         # Перевіряємо тип результату
         if isinstance(result, dict):
-            if "audio" in result:
+            if "audio" in result and os.path.exists(result["audio"]):
                 # Відправляємо аудіо
                 try:
                     with open(result["audio"], 'rb') as audio_file:
@@ -90,7 +92,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 if "images" in result:
                     for img_path in result["images"]:
                         try:
-                            if os.path.exists(img_path):
+                            if os.path.exists(img_path) and os.path.getsize(img_path) > 0:
                                 with open(img_path, 'rb') as img_file:
                                     await update.message.reply_photo(
                                         photo=img_file,
@@ -106,13 +108,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         elif isinstance(result, str) and os.path.exists(result):
             # Відео файл
             try:
-                # Сповіщаємо про відправку відео
+                # Перевіряємо розмір файлу (Telegram має обмеження 50MB)
+                file_size = os.path.getsize(result) / (1024 * 1024)  # MB
+                if file_size > 45:
+                    await update.message.reply_text("📖 Відео занадто велике, ось історія:")
+                    await update.message.reply_text(f"{generate_story(user_message)}")
+                    os.remove(result)
+                    return
+                
                 await update.message.reply_text("📤 Відправляю відео...")
                 
                 with open(result, 'rb') as video_file:
                     await update.message.reply_video(
                         video=video_file,
-                        caption=f"🎉 Ваше відео готове!\nТема: {user_message}\n\n{generate_story(user_message)}",
+                        caption=f"🎉 Ваше відео готове!\nТема: {user_message}",
                         supports_streaming=True,
                         width=1024,
                         height=768
@@ -128,6 +137,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
     except Exception as e:
         logging.error(f"Помилка: {e}")
+        import traceback
+        traceback.print_exc()
         await update.message.reply_text("❌ Сталася помилка. Спробуйте іншу тему або напишіть /start")
 
 # Функції для вебхука
