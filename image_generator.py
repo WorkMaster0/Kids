@@ -1,39 +1,8 @@
 from PIL import Image, ImageDraw, ImageFont
 import random
-import requests
-from io import BytesIO
 
-def generate_ai_image(prompt: str, filename: str):
-    """Генерація зображення через безкоштовний сервіс (без OpenAI)"""
-    try:
-        # Використовуємо бесплатний сервіс для генерації зображень
-        # Замінюємо на будь-який безкоштовний API
-        return generate_simple_image(prompt, filename)
-        
-    except Exception as e:
-        # Резервний варіант - просте зображення
-        print(f"Помилка генерації зображення: {e}")
-        return generate_simple_image(prompt, filename)
-
-def generate_simple_image(prompt: str, filename: str):
-    """Резервна генерація простого зображення"""
-    width, height = 1024, 768
-    img = Image.new('RGB', (width, height), color='lightblue')
-    draw = ImageDraw.Draw(img)
-    
-    # Додаємо текст
-    try:
-        font = ImageFont.truetype("arial.ttf", 40)
-    except:
-        font = ImageFont.load_default()
-    
-    draw.text((width//2, height//2), prompt, fill='black', font=font, anchor='mm')
-    img.save(filename)
-    
-    return filename
-
-def generate_story_image(prompt: str, filename: str):
-    """Генерація зображення для сцени історії"""
+def generate_video_image(prompt: str, filename: str):
+    """Генерація зображення для відео"""
     try:
         width, height = 1024, 768
         
@@ -41,7 +10,7 @@ def generate_story_image(prompt: str, filename: str):
         img = Image.new('RGB', (width, height), color='lightblue')
         draw = ImageDraw.Draw(img)
         
-        # Створюємо градієнтний фон
+        # Градієнтний фон
         for y in range(height):
             r = int(135 + (120 * y / height))
             g = int(206 + (49 * y / height))
@@ -51,7 +20,6 @@ def generate_story_image(prompt: str, filename: str):
         # Кольори для дитячих зображень
         colors = ['#FF6B6B', '#4ECDC4', '#FFE66D', '#6B48FF', '#FF9F1C', '#FF48C4', '#2BD62B', '#FF8C42']
         
-        # Малюємо яскраві фігури (хмари, сонце, будинки)
         # Сонце
         draw.ellipse([50, 50, 200, 200], fill='#FFE66D', outline='#FF9F1C')
         
@@ -70,12 +38,13 @@ def generate_story_image(prompt: str, filename: str):
             width_house = random.randint(120, 200)
             
             # Основа будинку
+            color_idx = (i * 2) % len(colors)
             draw.rectangle([x, y, x+width_house, y+height_house], 
-                          fill=colors[i*2], outline='white')
+                          fill=colors[color_idx], outline='white')
             
             # Дах
             draw.polygon([(x-20, y), (x+width_house//2, y-50), (x+width_house+20, y)],
-                        fill=colors[i*2+1], outline='white')
+                        fill=colors[(color_idx + 1) % len(colors)], outline='white')
             
             # Вікно
             draw.rectangle([x+width_house//4, y+height_house//3, 
@@ -91,24 +60,45 @@ def generate_story_image(prompt: str, filename: str):
             # Крона
             draw.ellipse([x-30, y-40, x+50, y+20], fill='#2E8B57', outline='#228B22')
         
-        # Додаємо текст сцени
+        # Додаємо текст
         try:
-            font = ImageFont.truetype("arial.ttf", 30)
-            words = prompt.split()[:8]  # Перші 8 слів
-            short_prompt = ' '.join(words)
-            
-            # Тінь для тексту
-            draw.text((width//2+2, height-52), short_prompt, fill='white', 
-                     font=font, anchor='mm')
-            # Основний текст
-            draw.text((width//2, height-50), short_prompt, fill='black', 
-                     font=font, anchor='mm')
+            font = ImageFont.truetype("arial.ttf", 36)
         except:
-            pass
+            font = ImageFont.load_default()
+        
+        # Тінь для тексту
+        draw.text((width//2+2, height//2+2), prompt, fill='white', 
+                 font=font, anchor='mm')
+        # Основний текст
+        draw.text((width//2, height//2), prompt, fill='black', 
+                 font=font, anchor='mm')
         
         img.save(filename)
+        print(f"Зображення збережено: {filename}")
         return True
         
     except Exception as e:
         print(f"Помилка генерації зображення: {e}")
         return generate_simple_image(prompt, filename)
+
+def generate_simple_image(prompt: str, filename: str):
+    """Резервна генерація простого зображення"""
+    try:
+        width, height = 1024, 768
+        img = Image.new('RGB', (width, height), color='lightblue')
+        draw = ImageDraw.Draw(img)
+        
+        # Додаємо текст
+        try:
+            font = ImageFont.truetype("arial.ttf", 40)
+        except:
+            font = ImageFont.load_default()
+        
+        draw.text((width//2, height//2), prompt, fill='black', font=font, anchor='mm')
+        img.save(filename)
+        
+        return True
+        
+    except Exception as e:
+        print(f"Помилка створення простого зображення: {e}")
+        return False
