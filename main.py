@@ -4,98 +4,72 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from video_generator import generate_children_video
 from flask import Flask, request
+import asyncio
+import json
 
 # Налаштування
 TOKEN = "8227990363:AAGGZbv_gMZyPdPM95f6FnbtxoY96wiqXpQ"
 logging.basicConfig(level=logging.INFO)
 
 # Отримуємо URL з змінних оточення Render
-RENDER_EXTERNAL_URL = os.environ.get('RENDER_EXTERNAL_URL', 'https://your-app-name.onrender.com')
+RENDER_EXTERNAL_URL = os.environ.get('RENDER_EXTERNAL_URL', 'https://kids-rvcr.onrender.com')
 WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}/{TOKEN}"
 
-# Створюємо Flask додаток для вебхука
+# Створюємо Flask додаток
 app = Flask(__name__)
 
 # Створюємо Telegram Application
 application = Application.builder().token(TOKEN).build()
 
+async def set_webhook_on_startup():
+    """Автоматично встановлюємо вебхук при запуску"""
+    try:
+        await application.bot.set_webhook(url=WEBHOOK_URL)
+        logging.info(f"✅ Webhook встановлено: {WEBHOOK_URL}")
+    except Exception as e:
+        logging.error(f"❌ Помилка встановлення webhook: {e}")
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /start"""
     welcome_text = (
         "👋 Привіт! Я створюю дитячі відео!\n\n"
-        "🎬 Доступні теми:\n"
-        "• Казки та історії\n"
-        "• Навчальні відео\n"
-        "• Пісеньки та віршики\n"
-        "• Розвиваючі заняття\n\n"
-        "Просто напиши тему для відео!"
+        "🎯 Напиши тему для відео!\n"
+        "Приклад: \"казка про динозаврика\""
     )
     await update.message.reply_text(welcome_text)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Обробка повідомлень з темою"""
     user_message = update.message.text
     user_id = update.message.from_user.id
     
-    await update.message.reply_text("🎬 Створюю відео... Це займе 1-2 хвилини!")
+    await update.message.reply_text("🎬 Створюю контент...")
     
     try:
-        # Генеруємо відео
         result = await generate_children_video(user_message, user_id)
         
         if isinstance(result, dict) and "audio" in result:
-            # Відправляємо аудіо + картинку
+            # Відправляємо аудіо
             with open(result["audio"], 'rb') as audio_file:
                 await update.message.reply_audio(
                     audio=audio_file,
                     caption=f"🎵 {result['text']}\n\nТема: {user_message}"
                 )
+            os.remove(result["audio"])
             
+            # Відправляємо зображення
             if "images" in result:
                 for img_path in result["images"]:
                     with open(img_path, 'rb') as img_file:
-                        await update.message.reply_photo(
-                            photo=img_file,
-                            caption="🖼️ Малюнок для історії!"
-                        )
+                        await update.message.reply_photo(photo=img_file)
                     os.remove(img_path)
-            
-            os.remove(result["audio"])
-            
-        elif isinstance(result, str) and os.path.exists(result):
-            # Відправляємо відео
-            with open(result, 'rb') as video_file:
-                await update.message.reply_video(
-                    video=video_file,
-                    caption=f"🎉 Ваше відео готове!\nТема: {user_message}"
-                )
-            os.remove(result)
         else:
             await update.message.reply_text(f"📖 {result['text']}\n\nТема: {user_message}")
             
     except Exception as e:
         logging.error(f"Помилка: {e}")
-        await update.message.reply_text("❌ Сталася помилка. Спробуйте пізніше.")
+        await update.message.reply_text("❌ Спробуйте іншу тему")
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Команда /help"""
-    help_text = (
-        "📖 Довідка по боту:\n\n"
-        "🎯 Як користуватися:\n"
-        "1. Напишіть тему для відео\n"
-        "2. Чекайте 1-2 хвилини\n"
-        "3. Отримуйте готове відео!\n\n"
-        "📚 Приклади тем:\n"
-        "• \"Казка про трьох поросят\"\n"
-        "• \"Вчимо кольори\"\n"
-        "• \"Весела пісенька про звіряток\"\n"
-        "• \"Розвиваюче відео про цифри\"\n\n"
-        "🎨 Бот створює:\n"
-        "• Яскраві анімації\n"
-        "• Дитячі голоси\n"
-        "• Веселу музику\n"
-        "• Навчальний контент"
-    )
+    help_text = "📖 Напиши тему для відео: \"казка\", \"вчимо кольори\", \"пісенька\""
     await update.message.reply_text(help_text)
 
 # Додаємо обробники
@@ -108,47 +82,84 @@ def home():
     return "🤖 Дитячий Video Bot is running! 🎬"
 
 @app.route('/set_webhook', methods=['GET'])
-async def set_webhook():
+def set_webhook_route():
     """Вручну встановити вебхук"""
     try:
-        await application.bot.set_webhook(url=WEBHOOK_URL)
+        # Використовуємо asyncio.run для синхронного контексту
+        asyncio.run(set_webhook_on_startup())
         return f"✅ Webhook встановлено: {WEBHOOK_URL}"
     except Exception as e:
         return f"❌ Помилка: {e}"
 
 @app.route('/remove_webhook', methods=['GET'])
-async def remove_webhook():
+def remove_webhook_route():
     """Видалити вебхук"""
     try:
-        await application.bot.delete_webhook()
+        asyncio.run(application.bot.delete_webhook())
         return "✅ Webhook видалено"
     except Exception as e:
         return f"❌ Помилка: {e}"
 
+@app.route('/status', methods=['GET'])
+def status():
+    """Перевірка статусу"""
+    return {
+        "status": "running",
+        "webhook_url": WEBHOOK_URL,
+        "bot_token": TOKEN[:10] + "..."  # Приховуємо повний токен
+    }
+
 @app.route(f'/{TOKEN}', methods=['POST'])
-async def webhook():
-    """Обробка вебхука від Telegram"""
+def webhook():
+    """Обробка вебхука від Telegram - СИНХРОННА версія"""
     try:
-        data = await request.get_json()
+        if not request.data:
+            return 'No data', 400
+            
+        # Отримуємо JSON дані
+        data = request.get_json()
+        if not data:
+            return 'Invalid JSON', 400
+        
+        # Створюємо Update об'єкт
         update = Update.de_json(data, application.bot)
-        await application.process_update(update)
+        
+        # Обробляємо оновлення в окремому потоці
+        def process_update_sync():
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                loop.run_until_complete(application.process_update(update))
+            finally:
+                loop.close()
+        
+        # Запускаємо в окремому потоці, щоб не блокувати
+        import threading
+        thread = threading.Thread(target=process_update_sync)
+        thread.start()
+        
         return 'OK'
+        
     except Exception as e:
         logging.error(f"Webhook error: {e}")
         return 'Error', 500
 
 def main():
-    """Запуск бота з вебхуком"""
-    # Перевіряємо чи ми на Render
+    """Запуск бота"""
     if os.environ.get('RENDER'):
         logging.info("🚀 Запуск на Render з вебхуком...")
         
+        # Автоматично встановлюємо вебхук при запуску
+        try:
+            asyncio.run(set_webhook_on_startup())
+        except Exception as e:
+            logging.error(f"Помилка встановлення webhook: {e}")
+        
         # Запускаємо Flask
         port = int(os.environ.get('PORT', 5000))
-        app.run(host='0.0.0.0', port=port, debug=False)
+        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
     else:
         logging.info("🖥️ Запуск локально з polling...")
-        # Локально використовуємо polling
         application.run_polling()
 
 if __name__ == "__main__":
