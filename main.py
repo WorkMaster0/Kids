@@ -79,92 +79,54 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("📝 Будь ласка, напиши тему (мінімум 2 символи)")
         return
     
-    if len(user_message) > 50:
-        await update.message.reply_text("📝 Тема занадто довга. Максимум 50 символів.")
+    if len(user_message) > 30:
+        await update.message.reply_text("📝 Тема занадто довга. Максимум 30 символів.")
         return
     
-    await update.message.reply_text("🎬 Створюю дитячу історію... Це може зайняти хвилину.")
+    await update.message.reply_text("🎬 Створюю мультфільм... Це займе близько хвилини ⏳")
     
     try:
-        result = await generate_video_with_audio(user_message, user_id)
-        
-        print(f"Результат генерації: {type(result)}")
+        result = await generate_cartoon(user_message, user_id)
         
         if isinstance(result, str) and os.path.exists(result):
-            # Відео файл
+            # Мультфільм створено
             try:
-                # Перевіряємо розмір файлу
                 file_size = os.path.getsize(result) / (1024 * 1024)
                 if file_size > 45:
-                    await update.message.reply_text("❌ Відео занадто велике для відправки")
-                    # Надсилаємо текст історії
-                    from video_generator import generate_story_from_topic
-                    story_text = generate_story_from_topic(user_message)
-                    await update.message.reply_text(f"📖 Ось історія:\n\n{story_text}")
+                    await update.message.reply_text("❌ Мультфільм занадто великий")
                     os.remove(result)
                     return
                 
-                await update.message.reply_text("📤 Відправляю відео...")
+                await update.message.reply_text("📤 Відправляю мультфільм...")
                 
                 with open(result, 'rb') as video_file:
                     await update.message.reply_video(
                         video=video_file,
-                        caption=f"🎉 Дитяча історія на тему: {user_message}",
+                        caption=f"🎉 Мультфільм на тему: {user_message}",
                         supports_streaming=True,
                         width=1024,
                         height=768
                     )
                 
-                # Видаляємо тимчасовий файл
                 if os.path.exists(result):
                     os.remove(result)
                     
             except Exception as e:
                 print(f"Помилка відправки відео: {e}")
-                # Надсилаємо текст історії
-                from video_generator import generate_story_from_topic
-                story_text = generate_story_from_topic(user_message)
-                await update.message.reply_text(f"📖 Ось історія:\n\n{story_text}")
-                
-        elif isinstance(result, dict) and "audio" in result:
-            # Тільки аудіо
-            try:
-                if os.path.exists(result["audio"]):
-                    with open(result["audio"], 'rb') as audio_file:
-                        await update.message.reply_audio(
-                            audio=audio_file,
-                            caption=f"🎵 Дитяча історія на тему: {user_message}",
-                            title="Дитяча історія",
-                            performer="StoryBot"
-                        )
-                    os.remove(result["audio"])
-                    
-                    # Надсилаємо текст історії
-                    if "text" in result:
-                        await update.message.reply_text(f"📖 Текст історії:\n\n{result['text']}")
-            except Exception as e:
-                print(f"Помилка відправки аудіо: {e}")
-                if "text" in result:
-                    await update.message.reply_text(f"📖 Ось історія:\n\n{result['text']}")
+                await update.message.reply_text("❌ Не вдалося відправити мультфільм")
                 
         elif isinstance(result, dict) and "text" in result:
-            # Тільки текст
-            await update.message.reply_text(f"📖 Дитяча історія на тему '{user_message}':\n\n{result['text']}")
+            # Тільки текст історії
+            await update.message.reply_text(f"📖 Ось ідея для мультфільму:\n\n{result['text']}")
             
         else:
-            # Генеруємо історію як запасний варіант
-            from video_generator import generate_story_from_topic
-            story_text = generate_story_from_topic(user_message)
-            await update.message.reply_text(f"📖 Ось історія:\n\n{story_text}")
+            await update.message.reply_text("❌ Не вдалося створити мультфільм")
             
     except Exception as e:
         logging.error(f"Помилка: {e}")
         import traceback
         traceback.print_exc()
-        # Генеруємо історію як запасний варіант
-        from video_generator import generate_story_from_topic
-        story_text = generate_story_from_topic(user_message)
-        await update.message.reply_text(f"📖 Ось історія:\n\n{story_text}")
+        await update.message.reply_text("❌ Сталася помилка. Спробуй іншу тему!")
 
 # Функції для вебхука
 def set_webhook_sync():
