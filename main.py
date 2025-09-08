@@ -5,7 +5,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from video_generator import generate_children_video
 from flask import Flask, request
 import asyncio
-import json
+import threading
 
 # Налаштування
 TOKEN = "8227990363:AAGGZbv_gMZyPdPM95f6FnbtxoY96wiqXpQ"
@@ -18,8 +18,15 @@ WEBHOOK_URL = f"{RENDER_EXTERNAL_URL}/{TOKEN}"
 # Створюємо Flask додаток
 app = Flask(__name__)
 
-# Створюємо Telegram Application
+# Створюємо та ініціалізуємо Telegram Application
 application = Application.builder().token(TOKEN).build()
+
+# Ініціалізуємо application
+async def initialize_app():
+    """Ініціалізація Application"""
+    await application.initialize()
+    await application.start()
+    logging.info("✅ Application ініціалізовано")
 
 async def set_webhook_on_startup():
     """Автоматично встановлюємо вебхук при запуску"""
@@ -85,7 +92,6 @@ def home():
 def set_webhook_route():
     """Вручну встановити вебхук"""
     try:
-        # Використовуємо asyncio.run для синхронного контексту
         asyncio.run(set_webhook_on_startup())
         return f"✅ Webhook встановлено: {WEBHOOK_URL}"
     except Exception as e:
@@ -106,35 +112,33 @@ def status():
     return {
         "status": "running",
         "webhook_url": WEBHOOK_URL,
-        "bot_token": TOKEN[:10] + "..."  # Приховуємо повний токен
+        "bot_token": TOKEN[:10] + "..."
     }
 
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
-    """Обробка вебхука від Telegram - СИНХРОННА версія"""
+    """Обробка вебхука від Telegram"""
     try:
         if not request.data:
             return 'No data', 400
             
-        # Отримуємо JSON дані
         data = request.get_json()
         if not data:
             return 'Invalid JSON', 400
         
-        # Створюємо Update об'єкт
         update = Update.de_json(data, application.bot)
         
-        # Обробляємо оновлення в окремому потоці
+        # Створюємо окремий event loop для кожного потоку
         def process_update_sync():
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             try:
                 loop.run_until_complete(application.process_update(update))
+            except Exception as e:
+                logging.error(f"Помилка обробки оновлення: {e}")
             finally:
                 loop.close()
         
-        # Запускаємо в окремому потоці, щоб не блокувати
-        import threading
         thread = threading.Thread(target=process_update_sync)
         thread.start()
         
@@ -144,20 +148,29 @@ def webhook():
         logging.error(f"Webhook error: {e}")
         return 'Error', 500
 
+async def shutdown():
+    """Коректне закриття"""
+    await application.stop()
+    await application.shutdown()
+
 def main():
     """Запуск бота"""
     if os.environ.get('RENDER'):
         logging.info("🚀 Запуск на Render з вебхуком...")
         
-        # Автоматично встановлюємо вебхук при запуску
+        # Ініціалізуємо та встановлюємо вебхук
         try:
+            asyncio.run(initialize_app())
             asyncio.run(set_webhook_on_startup())
         except Exception as e:
-            logging.error(f"Помилка встановлення webhook: {e}")
+            logging.error(f"Помилка ініціалізації: {e}")
         
         # Запускаємо Flask
         port = int(os.environ.get('PORT', 5000))
         app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+        
+        # Коректне закриття
+        asyncio.run(shutdown())
     else:
         logging.info("🖥️ Запуск локально з polling...")
         application.run_polling()
