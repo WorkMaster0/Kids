@@ -2,14 +2,16 @@ import os
 import logging
 from telegram import Update, Bot
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from video_generator import generate_children_video
+from video_generator import generate_children_video, generate_story
 from flask import Flask, request
 import asyncio
 import threading
+import tempfile
+import requests
 
 # Налаштування
-TOKEN = "8227990363:AAGGZbv_gMZyPdPM95f6FnbtxoY96wiqXpQ"
-logging.basicConfig(level=logging.INFO)
+TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', "8227990363:AAGGZbv_gMZyPdPM95f6FnbtxoY96wiqXpQ")
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 # Отримуємо URL з змінних оточення Render
 RENDER_EXTERNAL_URL = os.environ.get('RENDER_EXTERNAL_URL', 'https://kids-rvcr.onrender.com')
@@ -23,14 +25,44 @@ bot = Bot(TOKEN)
 
 # Обробники команд
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    welcome_text = "👋 Привіт! Напиши тему для відео (наприклад: 'казка про динозаврика')"
+    welcome_text = (
+        "👋 Привіт! Я створюю дитячі історії!\n\n"
+        "Напиши тему для відео, наприклад:\n"
+        "• казка про динозаврика\n"
+        "• пригоди у лісі\n"
+        "• космічна подорож\n"
+        "• історія про принцесу\n"
+        "• веселі машинки\n\n"
+        "Я згенерую історію, зображення та відео!"
+    )
     await update.message.reply_text(welcome_text)
+
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = (
+        "ℹ️ Допомога:\n\n"
+        "Просто напиши будь-яку тему для дитячої історії, наприклад:\n"
+        "- казка про дракончика\n"
+        "- пригоди у морі\n"
+        "- історія про робота\n"
+        "- веселі тварини\n\n"
+        "Я створюю:\n"
+        "📖 Текст історії\n"
+        "🎨 Зображення\n"
+        "🎵 Аудіо розповідь\n"
+        "🎬 Відео (якщо вдасться)\n\n"
+        "Почни з команди /start"
+    )
+    await update.message.reply_text(help_text)
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     user_id = update.message.from_user.id
     
-    await update.message.reply_text("🎬 Створюю контент...")
+    if len(user_message) < 3:
+        await update.message.reply_text("📝 Будь ласка, напиши трохи довшу тему (мінімум 3 символи)")
+        return
+    
+    await update.message.reply_text("🎬 Створюю дитячу історію... Це може зайняти кілька хвилин.")
     
     try:
         result = await generate_children_video(user_message, user_id)
@@ -39,43 +71,69 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if isinstance(result, dict):
             if "audio" in result:
                 # Відправляємо аудіо
-                with open(result["audio"], 'rb') as audio_file:
-                    await update.message.reply_audio(
-                        audio=audio_file,
-                        caption=f"🎵 {result['text']}\n\nТема: {user_message}"
-                    )
-                os.remove(result["audio"])
+                try:
+                    with open(result["audio"], 'rb') as audio_file:
+                        await update.message.reply_audio(
+                            audio=audio_file,
+                            caption=f"🎵 Аудіо історія:\n\n{result['text']}\n\nТема: {user_message}",
+                            title="Дитяча історія",
+                            performer="StoryBot"
+                        )
+                    # Видаляємо тимчасові файли
+                    if os.path.exists(result["audio"]):
+                        os.remove(result["audio"])
+                except Exception as e:
+                    print(f"Помилка відправки аудіо: {e}")
+                    await update.message.reply_text(f"📖 Ось ваша історія:\n\n{result['text']}")
                 
                 # Відправляємо зображення
                 if "images" in result:
                     for img_path in result["images"]:
-                        with open(img_path, 'rb') as img_file:
-                            await update.message.reply_photo(photo=img_file)
-                        os.remove(img_path)
+                        try:
+                            if os.path.exists(img_path):
+                                with open(img_path, 'rb') as img_file:
+                                    await update.message.reply_photo(
+                                        photo=img_file,
+                                        caption="🖼️ Зображення до історії"
+                                    )
+                                os.remove(img_path)
+                        except Exception as e:
+                            print(f"Помилка відправки зображення: {e}")
             elif "text" in result:
                 # Тільки текст
-                await update.message.reply_text(f"📖 {result['text']}\n\nТема: {user_message}")
+                await update.message.reply_text(f"📖 Ось ваша історія:\n\n{result['text']}\n\nТема: {user_message}")
                 
         elif isinstance(result, str) and os.path.exists(result):
             # Відео файл
-            with open(result, 'rb') as video_file:
-                await update.message.reply_video(
-                    video=video_file,
-                    caption=f"🎉 Ваше відео готове!\nТема: {user_message}"
-                )
-            os.remove(result)
+            try:
+                # Сповіщаємо про відправку відео
+                await update.message.reply_text("📤 Відправляю відео...")
+                
+                with open(result, 'rb') as video_file:
+                    await update.message.reply_video(
+                        video=video_file,
+                        caption=f"🎉 Ваше відео готове!\nТема: {user_message}\n\n{generate_story(user_message)}",
+                        supports_streaming=True,
+                        width=1024,
+                        height=768
+                    )
+                if os.path.exists(result):
+                    os.remove(result)
+            except Exception as e:
+                print(f"Помилка відправки відео: {e}")
+                # Якщо відео не вдалося відправити, надсилаємо текст історії
+                await update.message.reply_text(f"📖 Ось ваша історія:\n\n{generate_story(user_message)}")
         else:
             await update.message.reply_text("❌ Не вдалося створити контент. Спробуйте іншу тему.")
             
     except Exception as e:
         logging.error(f"Помилка: {e}")
-        await update.message.reply_text("❌ Спробуйте іншу тему")
+        await update.message.reply_text("❌ Сталася помилка. Спробуйте іншу тему або напишіть /start")
 
 # Функції для вебхука
 def set_webhook_sync():
     """Синхронне встановлення вебхука"""
     try:
-        import requests
         url = f"https://api.telegram.org/bot{TOKEN}/setWebhook"
         data = {"url": WEBHOOK_URL}
         response = requests.post(url, json=data)
@@ -102,6 +160,7 @@ def process_update_sync(update_data):
         
         # Додаємо обробники
         app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("help", help_command))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         
         # Ініціалізуємо та обробляємо
@@ -130,7 +189,6 @@ def set_webhook_route():
 def remove_webhook_route():
     """Видалити вебхук"""
     try:
-        import requests
         url = f"https://api.telegram.org/bot{TOKEN}/deleteWebhook"
         response = requests.post(url)
         return "✅ Webhook видалено"
@@ -141,15 +199,15 @@ def remove_webhook_route():
 def status():
     """Перевірка статусу"""
     try:
-        import requests
         url = f"https://api.telegram.org/bot{TOKEN}/getWebhookInfo"
         response = requests.get(url).json()
         return {
             "status": "running",
-            "webhook_info": response
+            "webhook_info": response,
+            "webhook_url": WEBHOOK_URL
         }
-    except:
-        return {"status": "running", "webhook_url": WEBHOOK_URL}
+    except Exception as e:
+        return {"status": "running", "error": str(e), "webhook_url": WEBHOOK_URL}
 
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
@@ -169,6 +227,25 @@ def webhook():
         logging.error(f"Webhook error: {e}")
         return 'Error', 500
 
+@app.route('/health', methods=['GET'])
+def health_check():
+    """Перевірка здоров'я додатку"""
+    return {"status": "healthy", "service": "kids-story-bot"}
+
+def run_flask():
+    """Запуск Flask сервера"""
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+
+def run_polling():
+    """Запуск бота з polling"""
+    logging.info("🖥️ Запуск локально з polling...")
+    application = Application.builder().token(TOKEN).build()
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    application.run_polling()
+
 def main():
     """Запуск бота"""
     if os.environ.get('RENDER'):
@@ -178,16 +255,11 @@ def main():
         set_webhook_sync()
         
         # Запускаємо Flask
-        port = int(os.environ.get('PORT', 5000))
-        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+        run_flask()
         
     else:
-        logging.info("🖥️ Запуск локально з polling...")
         # Для локального запуску
-        application = Application.builder().token(TOKEN).build()
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        application.run_polling()
+        run_polling()
 
 if __name__ == "__main__":
     main()
