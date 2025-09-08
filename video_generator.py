@@ -106,49 +106,58 @@ def generate_audio(text: str, filename: str):
     return filename
 
 async def generate_children_video(topic: str, user_id: str):
-    """Основна функція генерації відео"""
+    """Генерація повноцінного дитячого відео"""
     try:
-        # Створюємо папку для користувача
-        user_dir = f"assets/user_{user_id}"
-        os.makedirs(user_dir, exist_ok=True)
-        
-        # Генеруємо контент
+        # Генеруємо історію
         story_text = generate_story(topic)
-        audio_path = f"{user_dir}/audio.mp3"
-        video_path = f"{user_dir}/video.mp4"
+        scenes = generate_story_scenes(story_text)
         
-        # Генеруємо аудіо
+        # Створюємо тимчасову папку
+        temp_dir = tempfile.mkdtemp()
+        audio_path = os.path.join(temp_dir, "story_audio.mp3")
+        
+        # Генеруємо аудіо історії
         generate_audio(story_text, audio_path)
         
-        # Генеруємо кілька сцен
-        clips = []
-        audio_clip = AudioFileClip(audio_path)
-        duration = audio_clip.duration
+        # Генеруємо зображення для кожної сцени
+        image_paths = []
+        for i, scene in enumerate(scenes):
+            img_path = os.path.join(temp_dir, f"scene_{i}.png")
+            if generate_story_image(scene['image_prompt'], img_path):
+                image_paths.append(img_path)
         
-        # Створюємо прості сцени
-        for i in range(3):
-            scene_path = f"{user_dir}/scene_{i}.png"
-            generate_image(f"Сцена {i} для {topic}", scene_path)
-            
-            image_clip = ImageClip(scene_path).set_duration(duration/3)
-            clips.append(image_clip)
+        # Створюємо відео (якщо є FFmpeg)
+        if len(image_paths) > 0:
+            try:
+                from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
+                
+                clips = []
+                audio_clip = AudioFileClip(audio_path)
+                total_duration = audio_clip.duration
+                scene_duration = total_duration / len(image_paths)
+                
+                for img_path in image_paths:
+                    clip = ImageClip(img_path).set_duration(scene_duration)
+                    clips.append(clip)
+                
+                final_clip = concatenate_videoclips(clips).set_audio(audio_clip)
+                video_path = os.path.join(temp_dir, "final_video.mp4")
+                final_clip.write_videofile(video_path, fps=24)
+                
+                return video_path
+                
+            except ImportError:
+                # Якщо moviepy не встановлено - повертаємо аудіо + зображення
+                return {
+                    "audio": audio_path,
+                    "images": image_paths,
+                    "text": story_text
+                }
         
-        # Створюємо відео
-        final_clip = CompositeVideoClip(clips).set_audio(audio_clip)
-        final_clip.write_videofile(
-            video_path,
-            fps=24,
-            codec='libx264',
-            audio_codec='aac'
-        )
-        
-        # Очищаємо тимчасові файли
-        for file in os.listdir(user_dir):
-            if file != "video.mp4":
-                os.remove(f"{user_dir}/{file}")
-        
-        return video_path
+        # Якщо немає зображень, повертаємо тільки текст
+        return {"text": story_text}
         
     except Exception as e:
         print(f"Помилка генерації відео: {e}")
-        return None
+        # ВИПРАВЛЕНО: повертаємо словник, а не рядок
+        return {"text": generate_story(topic)}
