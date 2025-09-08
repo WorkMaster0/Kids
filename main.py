@@ -35,16 +35,37 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         result = await generate_children_video(user_message, user_id)
         
-        if isinstance(result, dict) and "audio" in result:
-            # Відправляємо аудіо
-            with open(result["audio"], 'rb') as audio_file:
-                await update.message.reply_audio(
-                    audio=audio_file,
-                    caption=f"🎵 {result['text']}\n\nТема: {user_message}"
+        # Перевіряємо тип результату
+        if isinstance(result, dict):
+            if "audio" in result:
+                # Відправляємо аудіо
+                with open(result["audio"], 'rb') as audio_file:
+                    await update.message.reply_audio(
+                        audio=audio_file,
+                        caption=f"🎵 {result['text']}\n\nТема: {user_message}"
+                    )
+                os.remove(result["audio"])
+                
+                # Відправляємо зображення
+                if "images" in result:
+                    for img_path in result["images"]:
+                        with open(img_path, 'rb') as img_file:
+                            await update.message.reply_photo(photo=img_file)
+                        os.remove(img_path)
+            elif "text" in result:
+                # Тільки текст
+                await update.message.reply_text(f"📖 {result['text']}\n\nТема: {user_message}")
+                
+        elif isinstance(result, str) and os.path.exists(result):
+            # Відео файл
+            with open(result, 'rb') as video_file:
+                await update.message.reply_video(
+                    video=video_file,
+                    caption=f"🎉 Ваше відео готове!\nТема: {user_message}"
                 )
-            os.remove(result["audio"])
+            os.remove(result)
         else:
-            await update.message.reply_text(f"📖 {result['text']}\n\nТема: {user_message}")
+            await update.message.reply_text("❌ Не вдалося створити контент. Спробуйте іншу тему.")
             
     except Exception as e:
         logging.error(f"Помилка: {e}")
