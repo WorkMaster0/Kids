@@ -1,3 +1,4 @@
+from image_generator import generate_story_image
 import os
 from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips
 from gtts import gTTS
