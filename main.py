@@ -132,8 +132,11 @@ def run_impulse_scan():
         send_telegram(msg)
 
 # ================= TELEGRAM WEBHOOK =================
-@app.route(f"/telegram/{TELEGRAM_TOKEN}", methods=["POST"])
-def telegram_webhook():
+@app.route("/telegram_webhook/<token>", methods=["POST"])
+def telegram_webhook(token):
+    if token != TELEGRAM_TOKEN:
+        return jsonify({"ok": False}), 403
+
     update = request.get_json(force=True)
     text = update.get("message", {}).get("text", "").lower()
 
