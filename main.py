@@ -7,8 +7,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 # ================= CONFIG =================
-TELEGRAM_TOKEN = "PASTE_TELEGRAM_TOKEN"
-CHAT_ID = "PASTE_CHAT_ID"
+TELEGRAM_TOKEN = "8227990363:AAGGZbv_gMZyPdPM95f6FnbtxoY96wiqXpQ"
+CHAT_ID = "6053907025"
 
 IMPULSE_THRESHOLD = 0.01  # 1%
 MAX_WORKERS = 10
