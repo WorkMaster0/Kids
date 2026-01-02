@@ -7,14 +7,14 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 # ================= CONFIG =================
-TELEGRAM_TOKEN = "8227990363:AAGGZbv_gMZyPdPM95f6FnbtxoY96wiqXpQ"
-CHAT_ID = "6053907025"
+TELEGRAM_TOKEN = "PASTE_TELEGRAM_TOKEN"
+CHAT_ID = "PASTE_CHAT_ID"
 
-IMPULSE_THRESHOLD = 0.01  # 1%
-MAX_WORKERS = 10
+IMPULSE_THRESHOLD = 0.003   # 0.3% (для реального ринку)
+MAX_WORKERS = 12
 PORT = 8000
 
-# ================= API URLS =================
+# ================= LBANK FUTURES API =================
 LBANK_FUTURES_SYMBOLS = "https://futures.lbank.com/api/v1/contracts"
 LBANK_FUTURES_KLINE = "https://futures.lbank.com/api/v1/kline"
 
@@ -39,7 +39,7 @@ def send_telegram(text):
     except Exception as e:
         log.error("Telegram error: %s", e)
 
-# ================= FUTURES SYMBOLS =================
+# ================= FETCH FUTURES SYMBOLS =================
 def fetch_futures_symbols():
     try:
         r = requests.get(LBANK_FUTURES_SYMBOLS, timeout=10)
@@ -48,7 +48,7 @@ def fetch_futures_symbols():
         symbols = [
             s["symbol"]
             for s in data.get("data", [])
-            if s.get("status") == 1
+            if s.get("status") == "open"
         ]
 
         log.info("Fetched %d futures symbols", len(symbols))
@@ -58,7 +58,7 @@ def fetch_futures_symbols():
         log.error("Symbols fetch error: %s", e)
         return []
 
-# ================= KLINES =================
+# ================= FETCH KLINES =================
 def fetch_klines(symbol, size=5):
     try:
         params = {
@@ -69,10 +69,11 @@ def fetch_klines(symbol, size=5):
         r = requests.get(LBANK_FUTURES_KLINE, params=params, timeout=5)
         data = r.json()
 
-        if "data" not in data:
+        if "data" not in data or not data["data"]:
             return None
 
-        return data["data"]
+        # LBANK повертає від нових до старих → розвертаємо
+        return list(reversed(data["data"]))
 
     except Exception as e:
         log.error("Kline error %s: %s", symbol, e)
@@ -84,10 +85,15 @@ def detect_impulse(symbol):
     if not klines or len(klines) < 4:
         return None
 
-    price_now = float(klines[-1]["close"])
-    price_past = float(klines[-4]["close"])
+    try:
+        price_now = float(klines[-1][4])
+        price_past = float(klines[-4][4])
+    except Exception:
+        return None
 
     change = (price_now - price_past) / price_past
+
+    log.info("%s change %.3f%%", symbol, change * 100)
 
     if abs(change) >= IMPULSE_THRESHOLD:
         return {
@@ -96,14 +102,19 @@ def detect_impulse(symbol):
             "change_pct": change * 100,
             "price": price_now
         }
+
     return None
 
-# ================= SCANNER =================
+# ================= SCAN RUNNER =================
 def run_impulse_scan():
-    send_telegram("⚡ LBANK FUTURES імпульсний скан запущено (3 хв / ≥1%)")
+    send_telegram("⚡ LBANK FUTURES імпульсний скан запущено (3 хв)")
     log.info("Impulse scan started")
 
     symbols = fetch_futures_symbols()
+    if not symbols:
+        send_telegram("❌ Не вдалося отримати список пар")
+        return
+
     results = []
 
     def scan(sym):
@@ -127,18 +138,16 @@ def run_impulse_scan():
             f"Direction: {r['direction']}\n"
             f"Move: {r['change_pct']:.2f}% за 3 хв\n"
             f"Price: {r['price']}\n"
-            f"Time: {datetime.utcnow()}"
+            f"Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')} UTC"
         )
         send_telegram(msg)
 
 # ================= TELEGRAM WEBHOOK =================
-@app.route("/telegram_webhook/<token>", methods=["POST"])
-def telegram_webhook(token):
-    if token != TELEGRAM_TOKEN:
-        return jsonify({"ok": False}), 403
-
+@app.route("/telegram_webhook", methods=["POST"])
+def telegram_webhook():
     update = request.get_json(force=True)
-    text = update.get("message", {}).get("text", "").lower()
+    message = update.get("message", {})
+    text = message.get("text", "").lower()
 
     if text.startswith("/impulse"):
         threading.Thread(target=run_impulse_scan, daemon=True).start()
